@@ -1,0 +1,32 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../node_modules/@prisma/client/app"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./app.db"
+}
+
+model Device {
+  id          String   @id @default(uuid())
+  userId      String   // Links to users_db User.id
+  deviceMac   String   @unique
+  name        String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  telemetries Telemetry[]
+}
+
+model Telemetry {
+  id          String   @id @default(uuid())
+  deviceId    String
+  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  temperature Float
+  heartRate   Int?
+  spo2        Int?
+  isAlert     Boolean  @default(false)
+  action      String?
+  timestamp   DateTime @default(now())
+}

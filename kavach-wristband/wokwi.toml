@@ -1,0 +1,13 @@
+# =============================================================
+#  Project : Kavach Safety Wristband
+#  File    : wokwi.toml
+#
+#  Tells the Wokwi VS Code extension where to find the firmware
+#  built by PlatformIO for the esp32dev environment.
+#  Run `pio run` first to generate these files.
+# =============================================================
+
+[wokwi]
+version  = 1
+elf      = .pio/build/esp32dev/firmware.elf
+firmware = .pio/build/esp32dev/firmware.bin

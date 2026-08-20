@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  users_db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: user_admin
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: users_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - users_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  app_db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: app_admin
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: app_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - app_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  users_data:
+  app_data:
