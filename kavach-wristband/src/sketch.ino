@@ -1,263 +1,236 @@
 // =============================================================
-//  Project  : Kavach Safety Wristband (First-Aid Edition)
-//  File     : sketch.ino
-//  Hardware : ESP32 DevKit C v4
+//  Project  : Kavach Safety Wristband — Final Firmware
+//  Hardware : ESP32 DevKit V1
+//             DS18B20  – body temperature  (GPIO 27, 1-Wire)
+//             MAX30100 – heart rate + SpO2 (SDA=GPIO21, SCL=GPIO22)
+//             SH1106   – 0.96" OLED        (SDA=GPIO21, SCL=GPIO22)
+//             Red LED  – alert indicator   (GPIO 26, 1kΩ series)
+//             Buzzer   – alert tone        (GPIO 25)
 //
-//  What it does
-//  ------------
-//  Monitors Body Temperature (DS18B20) and Heart Rate (MAX30102).
-//  If any vital sign leaves the safe range, it triggers the alert
-//  (buzzer/vibration) and displays critical Medical First Aid 
-//  instructions on the OLED screen.
+//  OLED: SH1106 @ 0x3C — SW I2C (bit-bang), CONFIRMED WORKING
+//  MAX30100: HW I2C (Wire) — non-fatal if not found
 // =============================================================
 
+#include <Arduino.h>
+#include <Wire.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
-#include "MAX30105.h"
-#include "heartRate.h"
+#include <U8g2lib.h>
+#include "MAX30100_PulseOximeter.h"
 
-// ── Simulator Toggle ─────────────────────────────────────────
-// Wokwi does NOT have a native MAX30102 sensor. 
-// Set this to 'true' to use the Potentiometer to simulate your Heart Rate in Wokwi.
-// Set this to 'false' when flashing to your real ESP32 hardware!
-const bool SIMULATE_IN_WOKWI = true;
-
-// ── Pin assignments ──────────────────────────────────────────
+// ── Pins ─────────────────────────────────────────────────────
 #define ONE_WIRE_BUS  27
-#define LED_PIN       26  // Acts as Vibration Motor simulation
+#define LED_PIN       26
 #define BUZZER_PIN    25
-#define POT_PIN       4   // Used to simulate Heart Rate in Wokwi
+// MAX30100 uses HW I2C Wire on GPIO21/22
+#define MAX_SDA_PIN   21
+#define MAX_SCL_PIN   22
+// OLED uses SW I2C on GPIO4/5 — SEPARATE from MAX30100 bus
+#define OLED_SDA_PIN   4
+#define OLED_SCL_PIN   5
 
-// ── OLED ─────────────────────────────────────────────────────
-#define SCREEN_WIDTH   128
-#define SCREEN_HEIGHT   64
-#define OLED_RESET      -1
-#define SCREEN_ADDRESS 0x3C
-
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+// ── OLED: SW I2C on GPIO4/5 — no conflict with MAX30100 ──────
+U8G2_SH1106_128X64_NONAME_F_SW_I2C display(U8G2_R2, /*clk=*/OLED_SCL_PIN, /*data=*/OLED_SDA_PIN, U8X8_PIN_NONE);
 
 // ── Temperature sensor ────────────────────────────────────────
 OneWire           oneWire(ONE_WIRE_BUS);
 DallasTemperature tempSensor(&oneWire);
 
-// ── MAX30102 Sensor ───────────────────────────────────────────
-MAX30105 particleSensor;
+// ── MAX30100 (optional — non-fatal if wiring issue) ───────────
+PulseOximeter pox;
+bool poxReady = false;   // false = sensor missing, show "--" instead
 
-// ── Safe Medical Ranges ──────────────────────────────────────
+// ── Safe medical ranges ──────────────────────────────────────
 const float SAFE_TEMP_MIN = 35.0f;
 const float SAFE_TEMP_MAX = 38.0f;
-
-const int SAFE_HR_MAX = 120; // Max resting heart rate before alert
-const int SAFE_SPO2_MIN = 92; // Min SpO2 percentage
+const int   SAFE_HR_MAX   = 120;
+const int   SAFE_SPO2_MIN = 92;
 
 // ── Runtime state ────────────────────────────────────────────
-bool alertActive = false;
-bool blinkState  = false;
-String currentAction = "";
+#define REPORT_MS 1000
+uint32_t lastReportMs = 0;
+bool     alertActive  = false;
+bool     blinkState   = false;
+String   currentAction = "";
 
-// HR Tracking
-const byte RATE_SIZE = 4;
-byte rates[RATE_SIZE];
-byte rateSpot = 0;
-long lastBeat = 0;
-float beatsPerMinute = 0;
-int beatAvg = 0;
-int simulatedSpO2 = 98;
+void onBeatDetected() {}
 
-// ─────────────────────────────────────────────────────────────
-// Forward declarations
-void updateDisplay(float temp, int hr, int spo2, bool alert, String action);
-void showSensorError(String sensorName);
+// =============================================================
+// OLED helpers
+// =============================================================
+void showSplash() {
+  display.clearBuffer();
+  display.setFont(u8g2_font_ncenB14_tr);
+  display.drawStr(18, 26, "KAVACH");
+  display.setFont(u8g2_font_6x10_tr);
+  display.drawStr(12, 42, "Medical Monitor");
+  display.drawStr(22, 56, "Initialising...");
+  display.drawFrame(0, 0, 128, 64);
+  display.sendBuffer();
+}
+
+void showWarning(const char* line1, const char* line2) {
+  display.clearBuffer();
+  display.setFont(u8g2_font_6x10_tr);
+  display.drawStr(10, 10, "KAVACH SYSTEM");
+  display.drawHLine(0, 14, 128);
+  display.drawStr(4, 30, line1);
+  display.drawStr(4, 44, line2);
+  display.sendBuffer();
+}
+
+void showVitals(float temp, int hr, int spo2, bool alert, const String& action) {
+  display.clearBuffer();
+
+  display.setFont(u8g2_font_6x10_tr);
+
+  // Top bar: T / HR / O2
+  char buf[32];
+  snprintf(buf, sizeof(buf), "T:%.1fC", temp);
+  display.drawStr(0, 9, buf);
+
+  if (hr > 0) {
+    snprintf(buf, sizeof(buf), "HR:%d", hr);
+  } else {
+    snprintf(buf, sizeof(buf), "HR:--");
+  }
+  display.drawStr(52, 9, buf);
+
+  if (spo2 > 0) {
+    snprintf(buf, sizeof(buf), "O2:%d%%", spo2);
+  } else {
+    snprintf(buf, sizeof(buf), "O2:--");
+  }
+  display.drawStr(93, 9, buf);
+
+  display.drawHLine(0, 12, 128);
+
+  // Status
+  display.setFont(u8g2_font_ncenB14_tr);
+  if (alert) {
+    display.drawStr(10, 30, "! ALERT !");
+  } else {
+    display.drawStr(34, 30, "SAFE");
+  }
+
+  // Action text (line-wrapped on \n)
+  display.drawHLine(0, 34, 128);
+  display.setFont(u8g2_font_6x10_tr);
+  int lineY = 45, start = 0;
+  for (int i = 0; i <= (int)action.length(); i++) {
+    if (action[i] == '\n' || action[i] == '\0') {
+      String chunk = action.substring(start, i);
+      display.drawStr(0, lineY, chunk.c_str());
+      lineY += 12;
+      start = i + 1;
+      if (lineY > 64) break;
+    }
+  }
+
+  display.sendBuffer();
+}
 
 // =============================================================
 // setup()
 // =============================================================
 void setup() {
   Serial.begin(115200);
+  delay(500);
+  Serial.println("[Kavach] Booting...");
 
   pinMode(LED_PIN,    OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(LED_PIN,    LOW);
   digitalWrite(BUZZER_PIN, LOW);
 
-  // Init Temp
+  // ── OLED via SW I2C (no Wire needed, proven working) ─────
+  display.begin();
+  display.setContrast(255);
+  showSplash();
+  Serial.println("[Kavach] OLED ready (SH1106 SW I2C).");
+
+  // ── DS18B20 ──────────────────────────────────────────────
   tempSensor.begin();
-  tempSensor.setResolution(9);
+  tempSensor.setResolution(11);
+  Serial.println("[Kavach] DS18B20 ready.");
 
-  // Init OLED
-  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-    Serial.println("[FATAL] SSD1306 init failed.");
-    for (;;);
+  // ── MAX30100 via HW I2C Wire on GPIO21/22 (exclusive bus) ──
+  Serial.println("[Kavach] Initialising MAX30100...");
+  Wire.begin(MAX_SDA_PIN, MAX_SCL_PIN);
+  Wire.setClock(100000);   // 100 kHz for better compatibility
+
+  if (pox.begin()) {
+    pox.setOnBeatDetectedCallback(onBeatDetected);
+    pox.setIRLedCurrent(MAX30100_LED_CURR_7_6MA);
+    poxReady = true;
+    Serial.println("[Kavach] MAX30100 ready.");
+  } else {
+    poxReady = false;
+    Serial.println("[WARN] MAX30100 not found — HR/SpO2 will show '--'");
+    Serial.println("       Check: VIN=3.3V, GND, SDA=GPIO21, SCL=GPIO22");
+    // Show warning on OLED briefly then continue
+    showWarning("MAX30100 not found", "HR/SpO2 unavailable");
+    delay(2000);
   }
 
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
-  display.setTextSize(2);
-  display.setCursor(20, 10);
-  display.println("KAVACH");
-  display.setTextSize(1);
-  display.setCursor(15, 35);
-  display.println("Medical Monitor");
-  display.display();
-
-  // Init MAX30102 (Skip if simulating in Wokwi)
-  if (!SIMULATE_IN_WOKWI) {
-    if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
-      Serial.println("[FATAL] MAX30102 was not found. Please check wiring/power.");
-      showSensorError("MAX30102");
-      for (;;);
-    }
-    particleSensor.setup(); 
-    particleSensor.setPulseAmplitudeRed(0x0A); 
-    particleSensor.setPulseAmplitudeGreen(0);  
-  }
-
-  delay(1500);
+  Serial.println("[Kavach] All systems go. Monitoring...");
 }
 
 // =============================================================
 // loop()
 // =============================================================
 void loop() {
-  // 1 ── Read Temperature
+  if (poxReady) pox.update();
+
+  if (millis() - lastReportMs < REPORT_MS) return;
+  lastReportMs = millis();
+
+  // 1. Temperature
   tempSensor.requestTemperatures();
   float tempC = tempSensor.getTempCByIndex(0);
 
   if (tempC == DEVICE_DISCONNECTED_C) {
-    digitalWrite(LED_PIN, LOW);
-    digitalWrite(BUZZER_PIN, LOW);
-    showSensorError("DS18B20");
+    showWarning("DS18B20 not found", "Check GPIO27 wiring");
+    Serial.println("[ERROR] DS18B20 disconnected.");
     delay(500);
     return;
   }
 
-  // 2 ── Read Heart Rate
-  if (SIMULATE_IN_WOKWI) {
-    // WOKWI SIMULATION: Use Potentiometer slider to mock Heart Rate (50 to 180 BPM)
-    int potValue = analogRead(POT_PIN);
-    beatAvg = map(potValue, 0, 4095, 50, 180);
-    
-    // Drop SpO2 if heart rate is dangerously high to mock a crisis
-    simulatedSpO2 = (beatAvg > SAFE_HR_MAX) ? 89 : 98;
-  } else {
-    // REAL HARDWARE: Use MAX30102
-    long irValue = particleSensor.getIR();
-    
-    if (checkForBeat(irValue) == true) {
-      long delta = millis() - lastBeat;
-      lastBeat = millis();
+  // 2. HR + SpO2 (only if sensor present)
+  int hr   = poxReady ? (int)pox.getHeartRate() : 0;
+  int spo2 = poxReady ? (int)pox.getSpO2()      : 0;
 
-      beatsPerMinute = 60 / (delta / 1000.0);
-
-      if (beatsPerMinute < 255 && beatsPerMinute > 20) {
-        rates[rateSpot++] = (byte)beatsPerMinute;
-        rateSpot %= RATE_SIZE;
-
-        beatAvg = 0;
-        for (byte x = 0 ; x < RATE_SIZE ; x++)
-          beatAvg += rates[x];
-        beatAvg /= RATE_SIZE;
-      }
-    }
-
-    if (irValue < 50000) {
-      beatAvg = 0;
-      simulatedSpO2 = 0;
-    } else {
-      simulatedSpO2 = (beatAvg > SAFE_HR_MAX) ? 89 : 98;
-    }
-  }
-
-  // 3 ── Medical Action Engine
-  alertActive = false;
-  currentAction = "Vitals are normal.\nYou are safe.";
+  // 3. Medical Action Engine
+  alertActive   = false;
+  currentAction = "Vitals normal.\nYou are safe.";
 
   if (tempC >= SAFE_TEMP_MAX) {
-    alertActive = true;
-    currentAction = "HEATSTROKE RISK!\nCool down rapidly, seek shade, call 911.";
+    alertActive   = true;
+    currentAction = "HEATSTROKE!\nCool down, call 911.";
   } else if (tempC <= SAFE_TEMP_MIN && tempC > 0) {
-    alertActive = true;
-    currentAction = "HYPOTHERMIA RISK!\nMove indoors, drink warm fluids.";
-  } else if (beatAvg >= SAFE_HR_MAX) {
-    alertActive = true;
-    currentAction = "HIGH HR DETECTED!\nSit down, rest, and take deep breaths.";
-  } else if (simulatedSpO2 > 0 && simulatedSpO2 <= SAFE_SPO2_MIN) {
-    alertActive = true;
-    currentAction = "LOW OXYGEN!\nMove to fresh air, breathe deeply.";
+    alertActive   = true;
+    currentAction = "HYPOTHERMIA!\nMove indoors, warm up.";
+  } else if (hr > 0 && hr >= SAFE_HR_MAX) {
+    alertActive   = true;
+    currentAction = "HIGH HR!\nSit, rest, breathe deep.";
+  } else if (spo2 > 0 && spo2 <= SAFE_SPO2_MIN) {
+    alertActive   = true;
+    currentAction = "LOW OXYGEN!\nMove to fresh air.";
   }
 
-  // 4 ── Drive Alerts
-  if (alertActive) {
-    blinkState = !blinkState;
-  } else {
-    blinkState = false;
-  }
-  digitalWrite(LED_PIN, blinkState);
+  // 4. Alert outputs
+  blinkState = alertActive ? !blinkState : false;
+  digitalWrite(LED_PIN,    blinkState);
   digitalWrite(BUZZER_PIN, blinkState);
 
-  // 5 ── OLED & Serial Update 
-  static unsigned long lastDisplayUpdate = 0;
-  if (millis() - lastDisplayUpdate > 500) {
-    updateDisplay(tempC, beatAvg, simulatedSpO2, alertActive, currentAction);
-    Serial.printf("[%s] Temp: %.1f C | HR: %d bpm | SpO2: %d%% | Action: %s\n",
-                  alertActive ? "ALERT" : "SAFE", tempC, beatAvg, simulatedSpO2, currentAction.c_str());
-    lastDisplayUpdate = millis();
-  }
-}
+  // 5. OLED
+  showVitals(tempC, hr, spo2, alertActive, currentAction);
 
-// =============================================================
-// OLED Renderer
-// =============================================================
-void updateDisplay(float temp, int hr, int spo2, bool alert, String action) {
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
-
-  // Top Bar: Vitals
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.print("T:"); display.print(temp, 1); display.print("C");
-  
-  display.setCursor(55, 0);
-  display.print("HR:"); display.print(hr);
-  
-  display.setCursor(95, 0);
-  display.print("O2:"); display.print(spo2); display.print("%");
-
-  display.drawLine(0, 10, SCREEN_WIDTH - 1, 10, SSD1306_WHITE);
-
-  // Middle Area: Status Alert
-  display.setTextSize(2);
-  if (alert) {
-    display.setCursor(14, 16);
-    display.print("! ALERT !");
-  } else {
-    display.setCursor(34, 16);
-    display.print("SAFE");
-  }
-
-  // Bottom Area: Medical Action Instructions
-  display.drawLine(0, 36, SCREEN_WIDTH - 1, 36, SSD1306_WHITE);
-  display.setTextSize(1);
-  display.setCursor(0, 40);
-  display.println(action);
-
-  display.display();
-}
-
-void showSensorError(String sensorName) {
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
-  display.setTextSize(1);
-  display.setCursor(10, 1);
-  display.print("KAVACH SYSTEM");
-  display.drawLine(0, 11, SCREEN_WIDTH - 1, 11, SSD1306_WHITE);
-  display.setCursor(12, 20);
-  display.print("** SENSOR ERROR **");
-  display.setCursor(4, 34);
-  display.print(sensorName);
-  display.print(" not found");
-  display.display();
+  // 6. Serial log
+  Serial.printf("[%s] T:%.1fC | HR:%s | O2:%s | %s\n",
+    alertActive ? "ALERT" : " SAFE",
+    tempC,
+    hr   > 0 ? String(hr).c_str()   : "--",
+    spo2 > 0 ? String(spo2).c_str() : "--",
+    currentAction.c_str());
 }

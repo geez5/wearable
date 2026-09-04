@@ -198,3 +198,224 @@ h1, h2, h3, h4, h5, h6 {
   -webkit-text-fill-color: transparent;
   letter-spacing: 0.05em;
 }
+
+/* -------------------------------------------------------------------------
+   SSE live indicator dot
+   ------------------------------------------------------------------------- */
+.sse-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-success);
+  box-shadow: 0 0 6px var(--accent-success);
+  animation: sse-blink 2s ease-in-out infinite;
+  margin-left: 6px;
+}
+
+@keyframes sse-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+.sse-pulse-ring {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 3px solid var(--accent-primary);
+  animation: sse-ring 1.4s linear infinite;
+}
+
+@keyframes sse-ring {
+  0%   { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+/* -------------------------------------------------------------------------
+   Simulation Control Panel
+   ------------------------------------------------------------------------- */
+.sim-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.sim-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: 1px solid var(--sim-color, var(--glass-border));
+  background: color-mix(in srgb, var(--sim-color, #fff) 8%, transparent);
+  color: var(--sim-color, var(--text-primary));
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+  position: relative;
+  overflow: hidden;
+  min-width: 140px;
+  justify-content: center;
+}
+
+.sim-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--sim-color, #fff) 18%, transparent);
+  box-shadow: 0 0 18px var(--sim-glow, rgba(255,255,255,0.2));
+  transform: translateY(-2px);
+}
+
+.sim-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.sim-btn-loading {
+  animation: sim-inject 0.6s ease;
+}
+
+@keyframes sim-inject {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(0.95); }
+  60%  { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+
+.sim-btn-icon {
+  display: flex;
+  align-items: center;
+}
+
+.sim-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-left: 4px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* -------------------------------------------------------------------------
+   Toast Notification Stack
+   ------------------------------------------------------------------------- */
+.toast-container {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: none;
+  max-width: 360px;
+  width: 100%;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  pointer-events: all;
+  animation: toast-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  position: relative;
+  overflow: hidden;
+}
+
+.toast::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  border-radius: 4px 0 0 4px;
+}
+
+.toast-danger {
+  background: rgba(20, 5, 10, 0.85);
+  border: 1px solid rgba(255, 42, 95, 0.4);
+  animation: toast-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
+             toast-glow-danger 2.5s ease-in-out infinite 0.35s;
+}
+
+.toast-danger::before { background: var(--accent-danger); }
+
+.toast-safe {
+  background: rgba(5, 18, 12, 0.85);
+  border: 1px solid rgba(0, 255, 136, 0.3);
+}
+
+.toast-safe::before { background: var(--accent-success); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(110%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes toast-glow-danger {
+  0%, 100% { box-shadow: 0 0 12px rgba(255,42,95,0.2), 0 8px 32px rgba(0,0,0,0.4); }
+  50%       { box-shadow: 0 0 24px rgba(255,42,95,0.5), 0 8px 32px rgba(0,0,0,0.4); }
+}
+
+.toast-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.toast-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin-bottom: 4px;
+}
+
+.toast-msg {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.toast-time {
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.35);
+  margin-top: 6px;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  border-radius: 4px;
+  transition: color 0.2s;
+}
+
+.toast-close:hover {
+  color: var(--text-primary);
+}
+
+/* -------------------------------------------------------------------------
+   Animated pulse for alert panel
+   ------------------------------------------------------------------------- */
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,42,95,0.4); }
+  50%       { box-shadow: 0 0 0 8px rgba(255,42,95,0); }
+}

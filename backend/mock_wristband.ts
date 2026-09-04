@@ -16,20 +16,32 @@ function sendTelemetry() {
   let hr = 70 + Math.floor(Math.random() * 10);
   let spo2 = 98;
 
+  // 3. Simulate Blood Pressure (normal: ~110-130 / 70-85)
+  let systolicBP  = 110 + Math.floor(Math.random() * 20); // 110–129
+  let diastolicBP = 70  + Math.floor(Math.random() * 15); // 70–84
+
   // Force Anomalies to test First Aid Engine
   if (loopCounter % 20 === 0) {
     // Every ~40 seconds, trigger Heatstroke
     tempC = 39.5; 
   } else if (loopCounter % 20 === 5) {
-    // Trigger High HR
+    // Trigger High HR / Low SpO2
     hr = 135;
     spo2 = 88;
   } else if (loopCounter % 20 === 10) {
     // Trigger Hypothermia
     tempC = 34.0;
+  } else if (loopCounter % 20 === 15) {
+    // Trigger High Blood Pressure
+    systolicBP  = 170;
+    diastolicBP = 110;
+  } else if (loopCounter % 20 === 18) {
+    // Trigger Low Blood Pressure
+    systolicBP  = 82;
+    diastolicBP = 50;
   }
 
-  // 3. Run Medical Action Engine
+  // 4. Run Medical Action Engine
   let isAlert = false;
   let action = "Vitals are normal. You are safe.";
 
@@ -45,6 +57,12 @@ function sendTelemetry() {
   } else if (spo2 <= 92) {
     isAlert = true;
     action = "LOW OXYGEN! Move to fresh air, breathe deeply.";
+  } else if (systolicBP >= 140 || diastolicBP >= 90) {
+    isAlert = true;
+    action = "HIGH BLOOD PRESSURE! Rest immediately, avoid exertion, seek medical attention.";
+  } else if (systolicBP <= 90 || diastolicBP <= 60) {
+    isAlert = true;
+    action = "LOW BLOOD PRESSURE! Lie down flat, hydrate, call for medical help if fainting occurs.";
   }
 
   const payload = JSON.stringify({
@@ -52,6 +70,8 @@ function sendTelemetry() {
     temperature: tempC,
     heartRate: hr,
     spo2,
+    systolicBP,
+    diastolicBP,
     isAlert,
     action
   });
@@ -66,7 +86,7 @@ function sendTelemetry() {
 
   const req = http.request(API_URL, options, (res: any) => {
     if (res.statusCode === 200) {
-      console.log(`[Sent] T:${tempC.toFixed(1)}C | HR:${hr} | O2:${spo2}% => ${isAlert ? 'ALERT' : 'SAFE'}`);
+      console.log(`[Sent] T:${tempC.toFixed(1)}C | HR:${hr} | O2:${spo2}% | BP:${systolicBP}/${diastolicBP} => ${isAlert ? 'ALERT' : 'SAFE'}`);
     }
   });
 

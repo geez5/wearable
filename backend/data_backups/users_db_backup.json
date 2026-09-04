@@ -5,5 +5,12 @@
     "name": "geetangi",
     "role": "USER",
     "createdAt": "2026-08-17T11:40:35.919Z"
+  },
+  {
+    "id": "41037d16-a856-4a1d-8049-ea9c33a91e84",
+    "email": "admin@kavach.com",
+    "name": "Admin",
+    "role": "USER",
+    "createdAt": "2026-08-29T13:37:35.425Z"
   }
 ]

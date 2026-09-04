@@ -26,6 +26,8 @@ model Telemetry {
   temperature Float
   heartRate   Int?
   spo2        Int?
+  systolicBP  Int?
+  diastolicBP Int?
   isAlert     Boolean  @default(false)
   action      String?
   timestamp   DateTime @default(now())
