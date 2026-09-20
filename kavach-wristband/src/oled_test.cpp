@@ -24,7 +24,8 @@
 // SW I2C (bit-bang) — proven to work, uses internal GPIO pull-ups
 // U8G2_R0 = proven to show content in brute-force test
 // If text appears upside down, physically rotate the OLED module 180°
-U8G2_SH1106_128X64_NONAME_F_SW_I2C oled(U8G2_R0, /*clk=*/SCL_PIN, /*data=*/SDA_PIN, U8X8_PIN_NONE);
+U8G2_SH1106_128X64_NONAME_F_SW_I2C oled(U8G2_R0, /*clk=*/SCL_PIN,
+                                        /*data=*/SDA_PIN, U8X8_PIN_NONE);
 
 // ── Simple test screen ───────────────────────────────────────
 void drawTestScreen(int frame) {
@@ -51,7 +52,8 @@ void drawTestScreen(int frame) {
   // Animated dot so you know it's alive
   char dots[5] = "    ";
   int d = (frame % 4);
-  for (int i = 0; i < d; i++) dots[i] = '.';
+  for (int i = 0; i < d; i++)
+    dots[i] = '.';
   oled.drawStr(106, 60, dots);
 
   oled.sendBuffer();
@@ -72,7 +74,8 @@ void setup() {
   oled.begin();
   oled.setContrast(255);
   Serial.println("[2] Drawing test screen...");
-  Serial.println("    --> OLED should now show KAVACH / OLED TEST / DISPLAY WORKING");
+  Serial.println(
+      "    --> OLED should now show KAVACH / OLED TEST / DISPLAY WORKING");
   Serial.println("\nIf your OLED shows KAVACH / OLED TEST / DISPLAY WORKING");
   Serial.println("then the display hardware and driver are working correctly.");
   Serial.println("=============================================");
@@ -86,7 +89,8 @@ void loop() {
 
   // Print heartbeat every 2 seconds
   if (frameCount % 20 == 0) {
-    Serial.printf("[alive] frame=%d — OLED should be showing test screen\n", frameCount);
+    Serial.printf("[alive] frame=%d — OLED should be showing test screen\n",
+                  frameCount);
   }
 
   delay(100);
